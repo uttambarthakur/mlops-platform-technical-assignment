@@ -5,3 +5,4 @@ dist
 .angular
 README.md
 Dockerfile
+.editorconfig

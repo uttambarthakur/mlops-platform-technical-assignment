@@ -15,7 +15,7 @@ COPY . .
 
 # Build the project for production 
 # Note: Output goes into the dist/ directory
-RUN npm run build --configuration=production
+RUN npm run build -- --configuration=production
 
 # --- STAGE 2: Serve the App using Nginx ---
 FROM nginx:alpine

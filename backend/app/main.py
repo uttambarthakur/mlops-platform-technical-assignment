@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 import jwt
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-from api.v1.minimum import router as minimum_router
-from log import get_logger
+from app.api.v1.minimum import router as minimum_router
+from app.services.log_manager import get_logger
 from app.models.orm_models import Base
 
 
