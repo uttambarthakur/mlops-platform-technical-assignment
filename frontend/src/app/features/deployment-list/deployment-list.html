@@ -1,0 +1,50 @@
+<section class="animate-[rise-in_420ms_ease-out_both]">
+	<div class="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+		<div>
+			<p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#17644f]">Operations / activity</p>
+			<h1 class="text-2xl font-semibold tracking-[-0.02em] text-[#202b27] sm:text-[30px]">Deployments</h1>
+			<p class="mt-2 text-sm text-[#718078]">Recent model releases across staging and production.</p>
+		</div>
+		<a routerLink="/deployment/register" class="inline-flex min-h-10 items-center justify-center rounded-md bg-[#17644f] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#10523f]">New deployment</a>
+	</div>
+
+	<div class="mt-8 flex flex-wrap gap-x-7 gap-y-3 border-y border-[#dce3dc] bg-white px-5 py-4 text-xs">
+		<span class="text-[#718078]">All <strong class="ml-1 text-[#202b27]">{{ deployments().length }}</strong></span>
+		<span class="text-[#718078]">Succeeded <strong class="ml-1 text-[#17644f]">{{ countStatus('SUCCEEDED') }}</strong></span>
+		<span class="text-[#718078]">In progress <strong class="ml-1 text-[#8a6524]">{{ countStatus('DEPLOYING') + countStatus('RETRYING') }}</strong></span>
+		<span class="text-[#718078]">Failed <strong class="ml-1 text-[#a34c3f]">{{ countStatus('FAILED') }}</strong></span>
+	</div>
+
+	@if (actionMessage()) {
+		<p role="status" class="mt-5 border-l-2 border-[#17644f] bg-[#eaf1ec] px-4 py-3 text-xs text-[#17644f]">{{ actionMessage() }}</p>
+	}
+	@if (errorMessage()) {
+		<p role="alert" class="mt-5 border-l-2 border-[#a34c3f] bg-[#fbefed] px-4 py-3 text-xs text-[#8e3f34]">{{ errorMessage() }}</p>
+	}
+
+	@if (loading()) {
+		<div role="status" class="mt-5 rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center text-sm text-[#718078]">Loading deployments…</div>
+	} @else if (!errorMessage() && deployments().length === 0) {
+		<div class="mt-5 rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center"><p class="text-sm font-semibold text-[#35433b]">No deployments yet</p><a routerLink="/deployment/register" class="mt-2 inline-block text-xs font-semibold text-[#17644f] hover:underline">Create a deployment</a></div>
+	} @else if (deployments().length > 0) {
+	<div class="mt-5 overflow-hidden rounded-md border border-[#dce3dc] bg-white">
+		<div class="overflow-x-auto">
+			<table class="w-full min-w-205 border-collapse text-left text-sm">
+				<thead class="bg-[#f7f8f6] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#718078]"><tr><th class="px-5 py-3">Deployment</th><th class="px-4 py-3">Version ID</th><th class="px-4 py-3">Environment</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Created</th><th class="px-5 py-3 text-right">Actions</th></tr></thead>
+				<tbody class="divide-y divide-[#edf0ec]">
+					@for (deployment of deployments(); track deployment.id) {
+						<tr class="hover:bg-[#fafbf9]">
+							<td class="px-5 py-4 font-mono text-xs font-semibold text-[#35433b]">#{{ deployment.id }}</td>
+							<td class="px-4 py-4 font-mono text-xs text-[#526058]">{{ deployment.version_id }}</td>
+							<td class="px-4 py-4 text-xs capitalize text-[#526058]">{{ deployment.environment }}</td>
+							<td class="px-4 py-4"><span class="inline-flex items-center gap-2 text-xs font-semibold" [class.text-[#17644f]]="deployment.status === 'SUCCEEDED'" [class.text-[#a34c3f]]="deployment.status === 'FAILED'" [class.text-[#8a6524]]="deployment.status === 'DEPLOYING'"><span class="size-1.5 rounded-full bg-current"></span>{{ deployment.status }}</span></td>
+							<td class="px-4 py-4 text-xs text-[#718078]">{{ deployment.created_at ? (deployment.created_at | date:'medium') : '—' }}</td>
+							<td class="px-5 py-4"><div class="flex justify-end gap-2"><button type="button" [disabled]="deployment.status !== 'FAILED' || pendingId() === deployment.id" (click)="runAction('retry', deployment.id)" class="min-h-8 rounded border border-[#d7dfd8] px-2.5 text-xs font-semibold text-[#526058] hover:border-[#17644f] hover:text-[#17644f] disabled:cursor-not-allowed disabled:opacity-40">{{ pendingId() === deployment.id ? 'Working…' : 'Retry' }}</button><button type="button" [disabled]="deployment.status !== 'SUCCEEDED' || pendingId() === deployment.id" (click)="runAction('rollback', deployment.id)" class="min-h-8 rounded border border-[#d7dfd8] px-2.5 text-xs font-semibold text-[#526058] hover:border-[#a34c3f] hover:text-[#a34c3f] disabled:cursor-not-allowed disabled:opacity-40">Rollback</button></div></td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+	}
+</section>

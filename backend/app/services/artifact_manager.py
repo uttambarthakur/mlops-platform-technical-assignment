@@ -30,10 +30,12 @@ class ArtifactManager:
         """
         # Query latest version for this model
         result = await db.execute(
-            select(Version).where(Version.model_id == model_id).order_by(Version.created_at.desc())
+            select(Version)
+            .where(Version.model_id == model_id)
+            .order_by(Version.version_number.desc())
         )
         latest_version = result.scalars().first()
-        next_version_num = 1 if not latest_version else latest_version.model_id + 1
+        next_version_num = 1 if not latest_version else latest_version.version_number + 1
         version_label = f"v{next_version_num}"
 
         version_folder = ArtifactManager._version_folder(model_id, model_name, version_label)

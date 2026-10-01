@@ -1,3 +1,24 @@
-/* You can add global styles to this file, and also import other style files */
-
 @import 'tailwindcss';
+
+@theme {
+  --font-sans: "Aptos", "Segoe UI", sans-serif;
+}
+
+html {
+  min-width: 320px;
+  background: #f3f5f1;
+  font-family: var(--font-sans);
+  color: #202b27;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}

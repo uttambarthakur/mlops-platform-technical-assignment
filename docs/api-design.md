@@ -72,9 +72,12 @@ The platform exposes REST APIs for model registry, version management, deploymen
   ```
 
 - `GET /models/{model_id}/versions` → List versions.
+- `POST /models/{model_id}/versions/{version_id}/approval` → Approve or reject a version. Requires the `approver` role.
+- `GET /models/{model_id}/versions/compare?version_a_id={id}&version_b_id={id}` → Compare two versions and their latest metric values.
 
 ### Deployments
 - `POST /deployments`  
+  Requires an `Idempotency-Key` header. Replaying the same key and payload returns the existing deployment; reusing a key with a different payload returns `409 Conflict`.
   **Request**:  
   ```json
   {
@@ -99,6 +102,8 @@ The platform exposes REST APIs for model registry, version management, deploymen
 - `POST /deployments/{deployment_id}/rollback` → Roll back deployment.
 
 ### Metrics
+- `POST /models/{model_id}/versions/{version_id}/metrics` → Ingest a batch of metric observations. Requires the `admin` or `operator` role.
+- `GET /models/{model_id}/metrics` → List recorded metric observations.
 - `GET /models/{model_id}/metrics`  
   **Response**:  
   ```json

@@ -1,0 +1,85 @@
+<section class="animate-[rise-in_420ms_ease-out_both]">
+	<div class="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+		<div>
+			<p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#17644f]">Observability / overview</p>
+			<h1 class="text-2xl font-semibold tracking-[-0.02em] text-[#202b27] sm:text-[30px]">Model monitoring</h1>
+			<p class="mt-2 text-sm text-[#718078]">Current operational signals for production models.</p>
+		</div>
+		<label for="metric-model" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">MODEL
+			<select id="metric-model" [value]="selectedModelId() ?? ''" (change)="selectModel($event)" [disabled]="loadingModels() || models().length === 0" class="h-9 min-w-56 rounded-md border border-[#d7dfd8] bg-white px-3 text-sm font-medium text-[#35433b] disabled:bg-[#f7f8f6]">
+				@for (model of models(); track model.id) { <option [value]="model.id">{{ model.name }}</option> }
+			</select>
+		</label>
+	</div>
+
+	@if (!loadingModels() && models().length > 0) {
+		<form (submit)="recordMetric($event)" class="mt-7 rounded-md border border-[#dce3dc] bg-white">
+			<div class="border-b border-[#e7ebe7] px-5 py-4">
+				<h2 class="text-sm font-semibold text-[#35433b]">Record a metric</h2>
+				<p class="mt-1 text-xs text-[#89958e]">Submit an observation for one model version.</p>
+			</div>
+			<div class="grid gap-4 px-5 py-5 sm:grid-cols-2 xl:grid-cols-4">
+				<label for="metric-version" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">VERSION
+					<select id="metric-version" name="version_id" required [value]="selectedVersionId()" (change)="selectVersion($event)" [disabled]="loadingVersions() || versions().length === 0" class="h-10 rounded-md border border-[#d7dfd8] bg-white px-3 text-sm font-medium text-[#35433b] disabled:bg-[#f7f8f6]">
+						<option value="" disabled>{{ loadingVersions() ? 'Loading versions…' : 'Select a version' }}</option>
+						@for (version of versions(); track version.id) { <option [value]="version.id">v{{ version.version_number }} · ID {{ version.id }}</option> }
+					</select>
+				</label>
+				<label for="metric-name" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">METRIC NAME
+					<input id="metric-name" name="metric_name" required maxlength="255" placeholder="latency_ms" class="h-10 rounded-md border border-[#d7dfd8] px-3 text-sm font-normal text-[#35433b] outline-none focus:border-[#17644f] focus:ring-2 focus:ring-[#17644f]/15" />
+				</label>
+				<label for="metric-value" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">VALUE
+					<input id="metric-value" name="metric_value" type="number" step="any" required class="h-10 rounded-md border border-[#d7dfd8] px-3 text-sm font-normal text-[#35433b] outline-none focus:border-[#17644f] focus:ring-2 focus:ring-[#17644f]/15" />
+				</label>
+				<label for="metric-status" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">STATUS
+					<select id="metric-status" name="monitoring_status" class="h-10 rounded-md border border-[#d7dfd8] bg-white px-3 text-sm font-medium text-[#35433b]"><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select>
+				</label>
+				<label for="last-inference" class="grid gap-1.5 text-[11px] font-semibold text-[#718078] sm:col-span-2">LAST SUCCESSFUL INFERENCE <span class="font-normal normal-case text-[#89958e]">Optional</span>
+					<input id="last-inference" name="last_successful_inference" type="datetime-local" class="h-10 rounded-md border border-[#d7dfd8] px-3 text-sm font-normal text-[#35433b] outline-none focus:border-[#17644f] focus:ring-2 focus:ring-[#17644f]/15" />
+				</label>
+				<div class="flex items-end sm:col-span-2 xl:justify-end"><button type="submit" [disabled]="ingesting() || loadingVersions() || versions().length === 0" class="min-h-10 w-full rounded-md bg-[#17644f] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#10523f] disabled:cursor-wait disabled:opacity-50 xl:w-auto">{{ ingesting() ? 'Recording…' : 'Record metric' }}</button></div>
+			</div>
+			@if (ingestError()) { <p role="alert" class="mx-5 mb-5 border-l-2 border-[#a34c3f] bg-[#fbefed] px-3 py-2 text-xs text-[#8e3f34]">{{ ingestError() }}</p> }
+			@if (ingestMessage()) { <p role="status" class="mx-5 mb-5 border-l-2 border-[#17644f] bg-[#eaf1ec] px-3 py-2 text-xs text-[#17644f]">{{ ingestMessage() }}</p> }
+		</form>
+	}
+
+	@if (loadingModels() || loadingMetrics()) {
+		<div role="status" class="mt-8 rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center text-sm text-[#718078]">Loading metrics from the API…</div>
+	} @else if (errorMessage()) {
+		<div role="alert" class="mt-8 rounded-md border border-[#e8d3ce] bg-white px-5 py-8"><p class="text-sm font-semibold text-[#8e3f34]">Could not load monitoring data</p><p class="mt-2 text-sm text-[#718078]">{{ errorMessage() }}</p><button type="button" (click)="loadMetrics()" class="mt-4 min-h-9 rounded-md border border-[#d7dfd8] px-3 text-xs font-semibold text-[#35433b] hover:bg-[#f1f4f0]">Try again</button></div>
+	} @else if (models().length === 0) {
+		<div class="mt-8 rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center"><p class="text-sm font-semibold text-[#35433b]">No models are registered</p><p class="mt-1 text-xs text-[#89958e]">Register a model before viewing its metrics.</p></div>
+	} @else if (metrics().length === 0) {
+		<div class="mt-8 rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center"><p class="text-sm font-semibold text-[#35433b]">No metrics recorded</p><p class="mt-1 text-xs text-[#89958e]">The selected model has no monitoring records yet.</p></div>
+	} @else {
+		<div class="mt-8 grid gap-px overflow-hidden rounded-md border border-[#dce3dc] bg-[#dce3dc] sm:grid-cols-2 xl:grid-cols-4">
+			@for (metric of metrics(); track metric.id) {
+				<article class="bg-white px-5 py-5">
+					<div class="flex items-start justify-between gap-3"><p class="text-xs font-medium capitalize text-[#718078]">{{ metricLabel(metric.metric_name) }}</p><span class="rounded-full px-2 py-1 text-[10px] font-semibold" [class.bg-[#eaf1ec]]="metric.monitoring_status === 'ACTIVE'" [class.text-[#17644f]]="metric.monitoring_status === 'ACTIVE'" [class.bg-[#f1f4f0]]="metric.monitoring_status !== 'ACTIVE'" [class.text-[#718078]]="metric.monitoring_status !== 'ACTIVE'">{{ metric.monitoring_status }}</span></div>
+					<p class="mt-5 text-3xl font-semibold tabular-nums tracking-[-0.03em] text-[#202b27]">{{ metric.metric_value | number:'1.0-3' }}<span class="ml-1.5 text-sm font-medium tracking-normal text-[#718078]">{{ metricUnit(metric.metric_name) }}</span></p>
+					<p class="mt-3 text-[11px] text-[#89958e]">Version ID {{ metric.version_id }}</p>
+				</article>
+			}
+		</div>
+
+		<div class="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+			<section>
+				<div class="flex items-baseline justify-between"><h2 class="text-sm font-semibold text-[#35433b]">Metric records</h2><button type="button" (click)="loadMetrics()" class="text-xs font-semibold text-[#17644f] hover:underline">Refresh</button></div>
+				<div class="mt-3 overflow-hidden rounded-md border border-[#dce3dc] bg-white">
+					  <div class="overflow-x-auto"><table class="w-full min-w-135 border-collapse text-left text-sm">
+						<thead class="bg-[#f7f8f6] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#718078]"><tr><th class="px-4 py-3">Metric</th><th class="px-4 py-3">Value</th><th class="px-4 py-3">Version</th><th class="px-4 py-3">Recorded</th></tr></thead>
+						<tbody class="divide-y divide-[#edf0ec]">@for (metric of metrics(); track metric.id) { <tr><td class="px-4 py-3 font-medium capitalize text-[#35433b]">{{ metricLabel(metric.metric_name) }}</td><td class="px-4 py-3 tabular-nums text-[#526058]">{{ metric.metric_value | number:'1.0-3' }} {{ metricUnit(metric.metric_name) }}</td><td class="px-4 py-3 text-xs text-[#718078]">{{ metric.version_id }}</td><td class="px-4 py-3 text-xs text-[#718078]">{{ metric.recorded_at ? (metric.recorded_at | date:'medium') : '—' }}</td></tr> }</tbody>
+					</table></div>
+				</div>
+			</section>
+			<section>
+				<h2 class="text-sm font-semibold text-[#35433b]">Monitoring status</h2>
+				<div class="mt-3 divide-y divide-[#e7ebe7] border-y border-[#dce3dc] bg-white px-5">
+					<div class="flex items-center justify-between py-4"><div><p class="text-sm font-medium text-[#35433b]">Active metrics</p><p class="mt-1 text-xs text-[#89958e]">For selected model</p></div><strong class="text-sm text-[#17644f]">{{ activeCount() }} / {{ metrics().length }}</strong></div>
+					<div class="flex items-center justify-between py-4"><div><p class="text-sm font-medium text-[#35433b]">Latest inference</p><p class="mt-1 text-xs text-[#89958e]">Reported by API</p></div><strong class="max-w-36 truncate text-xs font-medium text-[#526058]">{{ metrics()[0].last_successful_inference || 'Not reported' }}</strong></div>
+				</div>
+			</section>
+		</div>
+	}
+</section>

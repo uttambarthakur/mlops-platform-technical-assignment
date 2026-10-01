@@ -11,11 +11,10 @@ from dotenv import load_dotenv
 import jwt
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-from app.api.v1.minimum import router as minimum_router
 from app.services.log_manager import get_logger
 from app.models.orm_models import Base
 
-
+load_dotenv()
 
 engine = create_async_engine(os.getenv("DATABASE_URL", ""), echo=True, future=True)
 AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -26,6 +25,9 @@ async def get_db():
         yield session
 
 
+from app.api.v1.minimum import router as minimum_router
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: ensure tables exist
@@ -34,9 +36,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: optional cleanup
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 logger = get_logger()
-load_dotenv()
 
 origins = [
     "https://localhost:4200",
@@ -57,17 +58,17 @@ def create_token(role: str, env: str = "staging", ttl_minutes: int = 30) -> str:
         "exp": exp
         }  # other claims can also be added if needed such as tenant_id
 
-    return jwt.encode(payload, os.getenv("SECRET_KEY", "thisissamplestring"), algorithm=os.getenv("ALGORITHM", "SHA256"))
+    return jwt.encode(payload, os.getenv("SECRET_KEY", "thisissamplestring"), algorithm=os.getenv("ALGORITHM", "HS256"))
 
 
 def decode_token(token: str):
     """Verify token and return role if valid"""
     try:
-        payload = jwt.decode(token, os.getenv("SECRET_KEY", "thisissamplestring"), algorithms=[os.getenv("ALGORITHM", "SHA256")])
+        payload = jwt.decode(token, os.getenv("SECRET_KEY", "thisissamplestring"), algorithms=[os.getenv("ALGORITHM", "HS256")])
         return payload
     except jwt.ExpiredSignatureError:
         return {"role": "guest", "env": "unknown", "error": "Token Expired"}
-    except jwt.PyJWKError:
+    except jwt.InvalidTokenError:
         return {"role": "guest", "env": "unknown", "error": "Invalid Token"}
 
 
@@ -111,15 +112,10 @@ async def jwt_role_auth(request: Request, call_next):
     role = claims.get("role", "guest")
     env = claims.get("env", "staging")
     # Governance rules
-    if request.url.path.startswith("/deployments") and request.method == "POST":
-        env = request.query_params.get("env", "staging")
-        if env.lower() == "production" and role != "admin":
-            return JSONResponse(status_code=403, content={"detail": "Only admin can deploy to production"})
-
     if request.url.path.endswith("rollback") and role not in ["admin", "operator"]:
         return JSONResponse(
             status_code=403,
-            content={"detail", "Rollback requires admin or operator role"}
+            content={"detail": "Rollback requires admin or operator role"}
         )
     if request.url.path.endswith("/versions") and request.method == "POST":
         if role != "approver":

@@ -2,11 +2,13 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql://mlops:mlops@db:5432/mlops
+      DATABASE_URL: postgresql+asyncpg://mlops:mlops@db:5432/mlops
       SECRET_KEY: "alongStringthatcanbegenerateusingopessl"
       ALGORITHM: "HS256"
     ports: ["8000:8000"]
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -19,4 +21,9 @@ services:
       POSTGRES_USER: mlops
       POSTGRES_PASSWORD: mlops
       POSTGRES_DB: mlops
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlops -d mlops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     ports: ["5432:5432"]

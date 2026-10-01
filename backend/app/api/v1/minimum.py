@@ -1,15 +1,30 @@
+import hashlib
+import json
+import tempfile
 from typing import List
 from pathlib import Path
 import random
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import select
 
-from app.models.schemas import ModelSaveRequest, ModelSaveResponse, DeploymentSaveRequest, DeploymentSaveResponse, VersionSaveRequest, VersionSaveResponse, MetricSaveResponse
-from app.models.orm_models import Model, Metric, Deployment, Version
-from app.main import get_db
+from app.models.schemas import (
+    DeploymentSaveRequest,
+    DeploymentSaveResponse,
+    MetricBatchIngestRequest,
+    MetricDelta,
+    MetricSaveResponse,
+    ModelSaveRequest,
+    ModelSaveResponse,
+    VersionApprovalRequest,
+    VersionComparisonResponse,
+    VersionSaveResponse,
+)
+from app.models.orm_models import Deployment, IdempotencyRecord, LifecycleStage, Metric, Model, MonitoringStatus, Version
+from app.main import AsyncSessionLocal, get_db
 from app.services.artifact_manager import ArtifactManager
 from app.services.log_manager import get_logger
 
@@ -56,22 +71,19 @@ async def save_model_version(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename")
 
-    # Save uploaded file temporarily
-    temp_path = Path(f"/tmp/{file.filename}")
-    with temp_path.open("wb") as buffer:
-        buffer.write(await file.read())
+    filename = Path(file.filename).name
+    if not filename:
+        raise HTTPException(status_code=400, detail="Uploaded file must have a filename")
 
-    artifact_uri = None
-    version_label = None
-
-    try:
-        artifact_uri, version_label = await ArtifactManager.save_version_file(
-            model.id, model.name, temp_path, db
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save version: {str(e)}")
-    finally:
-        temp_path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / filename
+        temp_path.write_bytes(await file.read())
+        try:
+            artifact_uri, version_label = await ArtifactManager.save_version_file(
+                model.id, model.name, temp_path, db
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save version: {str(e)}") from e
 
     if not artifact_uri or not version_label:
         raise HTTPException(status_code=500, detail="Artifact manager did not return valid paths")
@@ -91,7 +103,7 @@ async def save_model_version(
     return new_version
 
 
-@router.get("/models/{model_id}/versions", response_model=VersionSaveResponse)
+@router.get("/models/{model_id}/versions", response_model=List[VersionSaveResponse])
 async def get_model_versions(model_id: int, db: AsyncSession = Depends(get_db)):
     # check if model exists
     result = await db.execute(select(Model).where(Model.id == model_id))
@@ -104,45 +116,139 @@ async def get_model_versions(model_id: int, db: AsyncSession = Depends(get_db)):
     versions = result.scalars().all()
     return versions
 
+
+@router.post(
+    "/models/{model_id}/versions/{version_id}/approval",
+    response_model=VersionSaveResponse,
+)
+async def update_version_approval(
+    model_id: int,
+    version_id: int,
+    decision: VersionApprovalRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    if request.state.claims.get("role") != "approver":
+        raise HTTPException(status_code=403, detail="Only approvers can update version approval")
+
+    result = await db.execute(
+        select(Version).where(Version.id == version_id, Version.model_id == model_id)
+    )
+    version = result.scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+    if version.lifecycle_stage == LifecycleStage.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived versions cannot be approved")
+
+    version.approval_status = decision.approval_status
+    if decision.approval_status == "APPROVED":
+        version.lifecycle_stage = LifecycleStage.APPROVED
+    await db.commit()
+    await db.refresh(version)
+    return version
+
+
+@router.get(
+    "/models/{model_id}/versions/compare",
+    response_model=VersionComparisonResponse,
+)
+async def compare_model_versions(
+    model_id: int,
+    version_a_id: int,
+    version_b_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if version_a_id == version_b_id:
+        raise HTTPException(status_code=400, detail="Choose two different versions to compare")
+
+    model = await db.get(Model, model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    result = await db.execute(
+        select(Version).where(
+            Version.model_id == model_id,
+            Version.id.in_([version_a_id, version_b_id]),
+        )
+    )
+    versions = {version.id: version for version in result.scalars().all()}
+    if len(versions) != 2:
+        raise HTTPException(status_code=404, detail="One or both model versions were not found")
+
+    result = await db.execute(
+        select(Metric)
+        .where(Metric.version_id.in_([version_a_id, version_b_id]))
+        .order_by(Metric.recorded_at.desc(), Metric.id.desc())
+    )
+    latest_metrics: dict[tuple[int, str], float] = {}
+    for metric in result.scalars().all():
+        latest_metrics.setdefault((metric.version_id, metric.metric_name), metric.metric_value)
+
+    metric_names = sorted({name for _, name in latest_metrics})
+    metric_deltas = []
+    for metric_name in metric_names:
+        value_a = latest_metrics.get((version_a_id, metric_name))
+        value_b = latest_metrics.get((version_b_id, metric_name))
+        metric_deltas.append(
+            MetricDelta(
+                metric_name=metric_name,
+                version_a_value=value_a,
+                version_b_value=value_b,
+                difference=value_b - value_a if value_a is not None and value_b is not None else None,
+            )
+        )
+
+    return VersionComparisonResponse.model_validate(
+        {
+            "model_id": model_id,
+            "version_a": versions[version_a_id],
+            "version_b": versions[version_b_id],
+            "metric_deltas": metric_deltas,
+        }
+    )
+
 def simulate_deployment_status() -> str:
     # 70% chance succeed, 30% chance fail
     return "SUCCEEDED" if random.random() < 0.7 else "FAILED"
 
-async def finalize_deployment(deployment_id: int, version_id: int, artifact_uri: str, environment: str, db: AsyncSession, delay: int = 5):
+async def finalize_deployment(
+    deployment_id: int,
+    version_id: int,
+    artifact_uri: str,
+    environment: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    delay: int = 5,
+):
     # Wait before updating (simulate deployment time)
     await asyncio.sleep(delay)
 
-    # Re-fetch deployment
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment:
-        return
+    async with session_factory() as db:
+        deployment = await db.get(Deployment, deployment_id)
+        if not deployment:
+            return
 
-    try:
-        # Try moving the artifact into deployments/{env}/
-        final_status = simulate_deployment_status()
-        if final_status == "SUCCEEDED":
-            deployed_path = await ArtifactManager.deploy_version(version_id, artifact_uri, environment)
-            deployment.artifact_uri = deployed_path
-        else:
-            # On failure, keep artifact_uri unchanged
-            deployment.artifact_uri = artifact_uri
+        try:
+            final_status = simulate_deployment_status()
+            if final_status == "SUCCEEDED":
+                deployed_path = await ArtifactManager.deploy_version(version_id, artifact_uri, environment)
+                deployment.artifact_uri = deployed_path
+            else:
+                deployment.artifact_uri = artifact_uri
 
-        deployment.status = final_status
-        await db.commit()
-        await db.refresh(deployment)
-
-        print(f"Deployment {deployment_id} finalized with status {final_status}")
-    except Exception as e:
-        # If file movement fails, mark as FAILED
-        deployment.status = "FAILED"
-        await db.commit()
-        await db.refresh(deployment)
-        print(f"Deployment {deployment_id} failed due to error: {e}")
+            deployment.status = final_status
+            await db.commit()
+        except Exception as error:
+            await db.rollback()
+            deployment.status = "FAILED"
+            await db.commit()
+            logger.error("Deployment %s failed: %s", deployment_id, error)
 
 @router.post("/deployments", response_model=DeploymentSaveResponse)
 async def save_deployment(
     deployment: DeploymentSaveRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
+    idempotency_key: str = Header(..., min_length=1, max_length=128, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db)
 ):
     # Check if version exists
@@ -150,6 +256,32 @@ async def save_deployment(
     version = result.scalar_one_or_none()
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
+
+    if deployment.environment.lower() == "production":
+        if request.state.claims.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Only admin can deploy to production")
+        if (version.approval_status or "").upper() != "APPROVED":
+            raise HTTPException(status_code=400, detail="Only approved versions can be deployed to production")
+
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "version_id": deployment.version_id,
+                "environment": deployment.environment.strip().lower(),
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    key = idempotency_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key cannot be blank")
+    existing_record = await db.get(IdempotencyRecord, key)
+    if existing_record is not None:
+        if existing_record.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="Idempotency-Key was already used for another request")
+        existing_deployment = await db.get(Deployment, existing_record.deployment_id)
+        if existing_deployment is not None:
+            return existing_deployment
 
     # Create new deployment with initial status
     new_deployment = Deployment(
@@ -159,7 +291,24 @@ async def save_deployment(
         status="DEPLOYING"
     )
     db.add(new_deployment)
-    await db.commit()
+    await db.flush()
+    db.add(
+        IdempotencyRecord(
+            idempotency_key=key,
+            request_hash=request_hash,
+            deployment_id=new_deployment.id,
+        )
+    )
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        existing_record = await db.get(IdempotencyRecord, key)
+        if existing_record is not None and existing_record.request_hash == request_hash:
+            existing_deployment = await db.get(Deployment, existing_record.deployment_id)
+            if existing_deployment is not None:
+                return existing_deployment
+        raise HTTPException(status_code=409, detail="Deployment request conflicts with existing data") from e
     await db.refresh(new_deployment)
 
     # Schedule background task to simulate file movement + status update
@@ -169,8 +318,8 @@ async def save_deployment(
         version.id,
         version.artifact_uri,
         deployment.environment,
-        db,
-        delay=120
+        AsyncSessionLocal,
+        delay=5
     )
 
     return new_deployment
@@ -215,8 +364,8 @@ async def retry_deployment(
         version.id,
         version.artifact_uri,
         deployment.environment,
-        db,
-        delay=60
+        AsyncSessionLocal,
+        delay=5
     )
 
     return deployment
@@ -241,7 +390,45 @@ async def rollback_deployment(deployment_id: int, db: AsyncSession = Depends(get
 
 
 # Metrics
-@router.get("/models/{model_id}/metrics", response_model=ModelSaveResponse)
+@router.post(
+    "/models/{model_id}/versions/{version_id}/metrics",
+    response_model=List[MetricSaveResponse],
+    status_code=201,
+)
+async def ingest_version_metrics(
+    model_id: int,
+    version_id: int,
+    payload: MetricBatchIngestRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    if request.state.claims.get("role") not in {"admin", "operator"}:
+        raise HTTPException(status_code=403, detail="Metric ingestion requires admin or operator role")
+
+    result = await db.execute(
+        select(Version).where(Version.id == version_id, Version.model_id == model_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+
+    records = [
+        Metric(
+            version_id=version_id,
+            metric_name=item.metric_name,
+            metric_value=item.metric_value,
+            monitoring_status=MonitoringStatus(item.monitoring_status.value),
+            last_successful_inference=item.last_successful_inference,
+        )
+        for item in payload.metrics
+    ]
+    db.add_all(records)
+    await db.commit()
+    for record in records:
+        await db.refresh(record)
+    return records
+
+
+@router.get("/models/{model_id}/metrics", response_model=List[MetricSaveResponse])
 async def get_model_metrics(model_id: int, db: AsyncSession = Depends(get_db)):
     # Governance: check if model exists
     result = await db.execute(select(Model).where(Model.id == model_id))

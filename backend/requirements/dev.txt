@@ -1,2 +1,4 @@
 -r base.txt
 pytest
+httpx2
+aiosqlite==0.21.0

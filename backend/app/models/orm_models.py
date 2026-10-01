@@ -82,6 +82,18 @@ class Deployment(Base):
 
     version: Mapped["Version"] = relationship("Version", back_populates="deployments")
 
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    deployment_id: Mapped[int] = mapped_column(
+        ForeignKey("deployments.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+
 class Metric(Base):
     __tablename__ = "metrics"
     

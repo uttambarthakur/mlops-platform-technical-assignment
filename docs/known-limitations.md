@@ -9,9 +9,8 @@
 - Rollback and retry logic operate on simulated state only.
 
 ## Metrics
-- Metrics stored as name/value pairs for flexibility.  
-- Requires pivoting for dashboard views (Angular must reshape arrays into charts/tables).  
-- No real inference pipeline generating live metrics; values are mocked or simulated.
+- Metrics can be ingested through a protected API and are stored as name/value pairs.  
+- No inference pipeline currently generates telemetry; metrics must be submitted by an external producer.
 
 ## Observability
 - Logging and correlation IDs are implemented, but no external monitoring stack (Prometheus, 
@@ -28,7 +27,7 @@
 - Background tasks simulate async deployments; no production‑grade queue (Celery/Redis/Kafka).  
 
 ## Angular Frontend
-- UI tests rely on mocked backend responses.  
+- Approval, metric-ingestion, and version-comparison controls are integrated; API authorization still requires a valid demo JWT.  
 - No production build optimizations (e.g., caching, CDN).  
 - Limited error handling for network failures.
 

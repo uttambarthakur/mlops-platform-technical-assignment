@@ -1,0 +1,109 @@
+<section class="animate-[rise-in_420ms_ease-out_both]">
+	<a routerLink="/models/list" class="mb-5 inline-flex text-xs font-semibold text-[#718078] hover:text-[#17644f]">← Model inventory</a>
+	@if (loading()) {
+		<div role="status" class="rounded-md border border-[#dce3dc] bg-white px-5 py-12 text-center text-sm text-[#718078]">Loading model details…</div>
+	} @else if (errorMessage() && !model()) {
+		<div role="alert" class="rounded-md border border-[#e8d3ce] bg-white px-5 py-8"><h1 class="text-lg font-semibold text-[#8e3f34]">Could not load this model</h1><p class="mt-2 text-sm text-[#718078]">{{ errorMessage() }}</p></div>
+	} @else if (model(); as modelRecord) {
+	<div class="flex flex-col justify-between gap-5 border-b border-[#dce3dc] pb-6 sm:flex-row sm:items-end">
+		<div>
+			<p class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#17644f]">Model / {{ modelRecord.id }}</p>
+			<h1 class="text-2xl font-semibold tracking-[-0.02em] text-[#202b27] sm:text-[30px]">{{ modelRecord.name }}</h1>
+			<p class="mt-2 text-sm text-[#718078]">{{ modelRecord.framework }} · {{ modelRecord.algorithm }} · {{ modelRecord.tags.join(' / ') }}</p>
+		</div>
+		<span class="rounded-full bg-[#edf2ee] px-3 py-1.5 text-xs font-semibold text-[#526058]">{{ modelRecord.tags.length }} tags</span>
+	</div>
+
+	<div class="grid gap-8 pt-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,0.8fr)]">
+		<section>
+			<div class="flex items-baseline justify-between gap-4">
+				<h2 class="text-sm font-semibold text-[#35433b]">Registered versions</h2>
+				<span class="text-xs text-[#89958e]">{{ versions().length }} versions</span>
+			</div>
+			<div class="mt-3 overflow-hidden rounded-md border border-[#dce3dc] bg-white">
+				<div class="overflow-x-auto">
+					  <table class="w-full min-w-205 border-collapse text-left text-sm">
+						<thead class="bg-[#f7f8f6] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#718078]"><tr><th class="px-4 py-3">Version</th><th class="px-4 py-3">Lifecycle</th><th class="px-4 py-3">Approval</th><th class="px-4 py-3">Artifact</th><th class="px-4 py-3">Created</th><th class="px-4 py-3">Decision</th></tr></thead>
+						<tbody class="divide-y divide-[#edf0ec]">
+							@for (version of versions(); track version.id) {
+								<tr>
+									<td class="px-4 py-4 font-semibold text-[#35433b]">{{ version.version_number }}<span class="mt-1 block text-[11px] font-normal text-[#89958e]">ID {{ version.id }}</span></td>
+									<td class="px-4 py-4 text-xs text-[#526058]">{{ version.lifecycle_stage }}</td>
+									<td class="px-4 py-4"><span class="rounded-full px-2.5 py-1 text-[11px] font-semibold" [class.bg-[#eaf1ec]]="version.approval_status === 'APPROVED'" [class.text-[#17644f]]="version.approval_status === 'APPROVED'" [class.bg-[#fbf6e9]]="version.approval_status !== 'APPROVED'" [class.text-[#8a6524]]="version.approval_status !== 'APPROVED'">{{ version.approval_status || 'PENDING' }}</span></td>
+									<td class="max-w-48 truncate px-4 py-4 font-mono text-[11px] text-[#718078]" [title]="version.artifact_uri">{{ version.artifact_uri }}</td>
+									<td class="px-4 py-4 text-xs text-[#718078]">{{ version.created_at || '—' }}</td>
+									<td class="px-4 py-4"><div class="flex gap-2"><button type="button" [disabled]="approvalPendingId() === version.id || version.approval_status === 'APPROVED'" (click)="updateApproval(version, 'APPROVED')" class="min-h-8 rounded border border-[#c4d9cc] px-2.5 text-xs font-semibold text-[#17644f] hover:bg-[#eaf1ec] disabled:cursor-not-allowed disabled:opacity-40">Approve</button><button type="button" [disabled]="approvalPendingId() === version.id || version.approval_status === 'REJECTED'" (click)="updateApproval(version, 'REJECTED')" class="min-h-8 rounded border border-[#e8d3ce] px-2.5 text-xs font-semibold text-[#8e3f34] hover:bg-[#fbefed] disabled:cursor-not-allowed disabled:opacity-40">Reject</button></div></td>
+								</tr>
+							} @empty {
+								<tr><td colspan="6" class="px-4 py-10 text-center text-sm text-[#89958e]">No versions registered for this model.</td></tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+			@if (approvalError()) { <p role="alert" class="mt-3 border-l-2 border-[#a34c3f] bg-[#fbefed] px-3 py-2 text-xs text-[#8e3f34]">{{ approvalError() }}</p> }
+			@if (approvalMessage()) { <p role="status" class="mt-3 border-l-2 border-[#17644f] bg-[#eaf1ec] px-3 py-2 text-xs text-[#17644f]">{{ approvalMessage() }}</p> }
+			<p class="mt-3 text-xs text-[#89958e]">Approval actions require an approver token.</p>
+
+			<section class="mt-8 border-t border-[#dce3dc] pt-5">
+				<div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+					<div><h2 class="text-sm font-semibold text-[#35433b]">Compare versions</h2><p class="mt-1 text-xs text-[#89958e]">Compare the latest recorded metric values.</p></div>
+					<div class="grid gap-3 sm:grid-cols-2">
+						<label for="compare-a" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">VERSION A
+							<select id="compare-a" [value]="compareVersionAId()" (change)="setCompareVersionA($event)" class="h-9 min-w-36 rounded-md border border-[#d7dfd8] bg-white px-3 text-xs text-[#35433b]">
+								@for (version of versions(); track version.id) { <option [value]="version.id" [selected]="compareVersionAId() === (version.id + '')">v{{ version.version_number }} · {{ version.id }}</option> }
+							</select>
+						</label>
+						<label for="compare-b" class="grid gap-1.5 text-[11px] font-semibold text-[#718078]">VERSION B
+							<select id="compare-b" [value]="compareVersionBId()" (change)="setCompareVersionB($event)" class="h-9 min-w-36 rounded-md border border-[#d7dfd8] bg-white px-3 text-xs text-[#35433b]">
+								@for (version of versions(); track version.id) { <option [value]="version.id" [selected]="compareVersionBId() === (version.id + '')">v{{ version.version_number }} · {{ version.id }}</option> }
+							</select>
+						</label>
+					</div>
+				</div>
+				<div class="mt-4 flex flex-wrap items-center gap-3">
+					<button type="button" [disabled]="comparing() || versions().length < 2 || compareVersionAId() === compareVersionBId()" (click)="compareVersions()" class="min-h-9 rounded-md bg-[#17644f] px-3 text-xs font-semibold text-white hover:bg-[#10523f] disabled:cursor-not-allowed disabled:opacity-50">{{ comparing() ? 'Comparing…' : 'Compare' }}</button>
+					@if (versions().length < 2) { <span class="text-xs text-[#89958e]">Register another version to compare.</span> }
+				</div>
+				@if (compareError()) { <p role="alert" class="mt-3 text-xs text-[#8e3f34]">{{ compareError() }}</p> }
+				@if (comparison(); as result) {
+					<div class="mt-4 overflow-x-auto rounded-md border border-[#dce3dc] bg-white">
+						<table class="w-full min-w-135 border-collapse text-left text-sm">
+							<thead class="bg-[#f7f8f6] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#718078]"><tr><th class="px-4 py-3">Metric</th><th class="px-4 py-3">v{{ result.version_a.version_number }}</th><th class="px-4 py-3">v{{ result.version_b.version_number }}</th><th class="px-4 py-3">Difference</th></tr></thead>
+							<tbody class="divide-y divide-[#edf0ec]">
+								@for (delta of result.metric_deltas; track delta.metric_name) { <tr><td class="px-4 py-3 font-medium text-[#35433b]">{{ metricName(delta.metric_name) }}</td><td class="px-4 py-3 tabular-nums text-[#526058]">{{ delta.version_a_value ?? '—' }}</td><td class="px-4 py-3 tabular-nums text-[#526058]">{{ delta.version_b_value ?? '—' }}</td><td class="px-4 py-3 tabular-nums text-[#526058]">{{ delta.difference ?? '—' }}</td></tr> }
+								@empty { <tr><td colspan="4" class="px-4 py-8 text-center text-xs text-[#89958e]">No metrics are recorded for these versions.</td></tr> }
+							</tbody>
+						</table>
+					</div>
+				}
+			</section>
+		</section>
+
+		<section class="h-fit rounded-md border border-[#dce3dc] bg-white">
+			<div class="border-b border-[#e7ebe7] px-5 py-4">
+				<h2 class="text-sm font-semibold text-[#35433b]">Add a version</h2>
+				<p class="mt-1 text-xs text-[#89958e]">Upload an artifact and identify its training data.</p>
+			</div>
+			<form (submit)="stageVersion($event)" class="grid gap-4 px-5 py-5">
+				<label for="artifact" class="grid gap-2 text-xs font-semibold text-[#526058]">Model artifact
+					<input id="artifact" name="file" type="file" required class="block w-full cursor-pointer rounded-md border border-[#d7dfd8] bg-white text-xs text-[#718078] file:mr-3 file:border-0 file:bg-[#edf2ee] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#17644f]" />
+				</label>
+				<label for="training-data" class="grid gap-2 text-xs font-semibold text-[#526058]">Training data reference
+					<input id="training-data" name="training_data_ref" required placeholder="dataset-pump-2026-q3" class="h-10 rounded-md border border-[#d7dfd8] px-3 text-sm font-normal outline-none focus:border-[#17644f] focus:ring-2 focus:ring-[#17644f]/15" />
+				</label>
+				<label for="approval" class="grid gap-2 text-xs font-semibold text-[#526058]">Initial approval status
+					<select id="approval" name="approval_status" class="h-10 rounded-md border border-[#d7dfd8] bg-white px-3 text-sm font-normal outline-none focus:border-[#17644f] focus:ring-2 focus:ring-[#17644f]/15"><option value="PENDING">Pending approval</option><option value="DRAFT">Draft</option></select>
+				</label>
+				<button type="submit" [disabled]="saving()" class="mt-1 min-h-10 rounded-md bg-[#17644f] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#10523f] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#17644f]">{{ saving() ? 'Uploading…' : 'Upload version' }}</button>
+			</form>
+			@if (errorMessage() && model()) {
+				<p role="alert" class="mx-5 mb-5 border-l-2 border-[#a34c3f] bg-[#fbefed] px-3 py-2 text-xs text-[#8e3f34]">{{ errorMessage() }}</p>
+			}
+			@if (successMessage()) {
+				<p role="status" class="mx-5 mb-5 border-l-2 border-[#17644f] bg-[#eaf1ec] px-3 py-2 text-xs text-[#17644f]">{{ successMessage() }}</p>
+			}
+		</section>
+	</div>
+	}
+</section>
